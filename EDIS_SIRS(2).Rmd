@@ -238,14 +238,7 @@ Vitals <- (backup_Vitals)
 Vitals$value <- as.character(Vitals$Result) %>% sapply(function(x) {if (!grepl("/",as.character(x))) x else strsplit(x,'/')[[1]][1]}) %>% as.numeric()
 Vitals$VitalsTime <- Vitals$VitalsDateTime  %>% sapply(function(x) strftime(x,'%Y-%m-%d %H:%M:%S'))
 Vitals <- select(Vitals, -Systolic, -Result)
-
-#uq_patientssn <-unique(Vitals$PatientSSN)
-
 #uq_patientssn <-  c("027607951" ,"104267685" )
-
-#uq_patient <-Vitals %>% filter(PatientSSN == uq_patientssn)
-#uq_date <- unique(uq_patient$VitalsDate)
-
 
 vital_type = c("BLOOD PRESSURE", "PULSE","RESPIRATION","TEMPERATURE")
 
@@ -262,30 +255,50 @@ l = list()
 for (uq_patientssn in unique(Vitals$PatientSSN)[70:77]){
     
     print(uq_patientssn)
-    #date_list = list()
+
     uq_patient <- Vitals %>% filter(PatientSSN == uq_patientssn)
     uq_dates <- unique(uq_patient$VitalsDate)
     
     for (i in 1:length(uq_dates)){
       date <-uq_dates[i]
       date_list=list()
-      #date_list[[date]] <- get_date_set(date)
+     
       date <-(as.Date(date, origin = "1970-01-01"))
       print(date)
       
       l[[uq_patientssn]][[i]]<-(get_date_set(date))
-      #print(typeof(date_list[[date]]))
-      #print(get_date_set(date))
+      
       
     }
-  
-    
-  
 }
 
 
 
-get_date_set(date)
+filterFlag <- function(x) {
+  flag_count = 0
+  spread_it <- x[,c(7,8)] %>% spread(key = VitalType, value = value)
+  v_types <- names(spread_it)
+  for (v in v_types) {
+    if (v == 'PULSE') {
+      if (spread_it[['PULSE']] > 90.0) {flag_count =  flag_count + 1}
+    }
+    if (v == 'TEMPERATURE'){
+      if (spread_it['TEMPERATURE'] > 100.0  | spread_it['TEMPERATURE'] < 95.0) {
+        flag_count = flag_count + 1 
+      }
+    }
+     if (v == 'BLOOD PRESSURE') {
+       if ( spread_it['BLOOD PRESSURE'] > 90.0) {flag_count = flag_count + 1}
+     }
+     if (v == 'RESPIRATION') {
+       if (spread_it['RESPIRATION'] < 20) {flag_count = flag_count + 1}
+     }
+  }
+  return (flag_count)
+}
+vt <- l[["129260959"]] %>% lapply (function(x) as.data.frame(x$date_set)) 
+a <- vt[1]
+filterFlag(a[[1]])
 
 
 
