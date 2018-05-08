@@ -178,7 +178,7 @@ SELECT DISTINCT
   CAST(EDIS.PatientArrivalDateTime AS DATE) AS LabsArrivalDate,
   SPat.PatientSSN AS LabsPatientSSN,
   CAST(Labs.LabChemSpecimenDateTime AS DATE) AS LabsDate,
-  CAST(Labs.LabChemSpecimenDateTime AS TIME) AS LabsTime,
+  Labs.LabChemSpecimenDateTime AS LabsTime,
   Labs.LabChemResultValue AS NEUT
 FROM
   LSV.EDIS.EDISLog AS EDIS
@@ -229,10 +229,6 @@ HFacYes$HFacYesFlag <- as.numeric(1)
 countYes <- HFacYes %>% select(ArrivalDate) %>% group_by(ArrivalDate) %>% summarise("yes" = n()) 
 
 
-
-
-
-
 #Vitals
 Vitals <- (backup_Vitals)
 Vitals$value <- as.character(Vitals$Result) %>% sapply(function(x) {if (!grepl("/",as.character(x))) x else strsplit(x,'/')[[1]][1]}) %>% as.numeric()
@@ -242,37 +238,27 @@ Vitals <- select(Vitals, -Systolic, -Result)
 
 vital_type = c("BLOOD PRESSURE", "PULSE","RESPIRATION","TEMPERATURE")
 
-get_date_set <- function(date){
-  
-    date_set <-Vitals %>% filter(PatientSSN ==uq_patientssn,      VitalsDate == date)
-    vital_idx <- sapply(vital_type, function(x) which(date_set$VitalType == x)[1]) %>% as.vector()
-    
-    flag = (sapply(date_set[vital_idx,]$VitalType, function(x) is.na(x)) %>% sum())
-    return (list(date_set = date_set[vital_idx,],missing_flag = flag, date = date))
+get_date_set <- function(date) {
+  date_set <- Vitals %>% filter(PatientSSN == uq_patientssn, VitalsDate == date)
+  vital_idx <- sapply(vital_type, function(x) which(date_set$VitalType == x)[1]) %>% as.vector()
+  flag = (sapply(date_set[vital_idx,]$VitalType, function(x) is.na(x)) %>% sum())
+  return (list(date_set = date_set[vital_idx,],missing_flag = flag, date = date, sirs_flag = filterFlag(date_set[vital_idx,])))
 }
 l = list()
 
-for (uq_patientssn in unique(Vitals$PatientSSN)[70:77]){
+for (uq_patientssn in unique(Vitals$PatientSSN)[70:77]) {
+  print(uq_patientssn)
+  uq_patient <- Vitals %>% filter(PatientSSN == uq_patientssn)
+  uq_dates <- unique(uq_patient$VitalsDate)
     
-    print(uq_patientssn)
-
-    uq_patient <- Vitals %>% filter(PatientSSN == uq_patientssn)
-    uq_dates <- unique(uq_patient$VitalsDate)
-    
-    for (i in 1:length(uq_dates)){
-      date <-uq_dates[i]
-      date_list=list()
-     
-      date <-(as.Date(date, origin = "1970-01-01"))
-      print(date)
-      
-      l[[uq_patientssn]][[i]]<-(get_date_set(date))
-      
-      
-    }
+  for (i in 1:length(uq_dates)) {
+    date <- uq_dates[i]
+    date_list = list()
+    date <- (as.Date(date, origin = "1970-01-01"))
+    print(date)
+    l[[uq_patientssn]][[i]] <- (get_date_set(date))
+  }
 }
-
-
 
 filterFlag <- function(x) {
   flag_count = 0
@@ -280,53 +266,59 @@ filterFlag <- function(x) {
   v_types <- names(spread_it)
   for (v in v_types) {
     if (v == 'PULSE') {
-      if (spread_it[['PULSE']] > 90.0) {flag_count =  flag_count + 1}
+      if (spread_it[['PULSE']] > 90.0) {
+        flag_count =  flag_count + 1
+      }
     }
-    if (v == 'TEMPERATURE'){
+    if (v == 'TEMPERATURE') {
       if (spread_it['TEMPERATURE'] > 100.0  | spread_it['TEMPERATURE'] < 95.0) {
         flag_count = flag_count + 1 
       }
     }
-     if (v == 'BLOOD PRESSURE') {
-       if ( spread_it['BLOOD PRESSURE'] > 90.0) {flag_count = flag_count + 1}
-     }
-     if (v == 'RESPIRATION') {
-       if (spread_it['RESPIRATION'] < 20) {flag_count = flag_count + 1}
-     }
+    if (v == 'BLOOD PRESSURE') {
+      if ( spread_it['BLOOD PRESSURE'] < 90.0) {
+        flag_count = flag_count + 1
+      }
+    }
+    if (v == 'RESPIRATION') {
+      if (spread_it['RESPIRATION'] > 20) {
+        flag_count = flag_count + 1
+      }
+    }
   }
-  return (flag_count)
+  return(flag_count)
 }
-vt <- l[["129260959"]] %>% lapply (function(x) as.data.frame(x$date_set)) 
-a <- vt[1]
-filterFlag(a[[1]])
 
-
-
-
-# following results in missing rows where difference in seconds
-earlySet <- Vitals %>% group_by(PatientSSN, VitalsDate) %>% summarise(VitalsDateTime = min(VitalsDateTime))
-vitals_final <- left_join(earlySet, Vitals, "VitalsDateTime")
-vitals_final <- spread(vitals_final, VitalType, value)
-
-# same as above
-earlySet <- Vitals %>% group_by(PatientSSN, VitalsTime) %>% summarise(VitalsDateTime = min(VitalsDateTime))
-vitals_final <- left_join(earlySet, Vitals, "VitalsDateTime")
-vitals_final <- spread(vitals_final, VitalType, value)
-
-# following results in separate rows where difference in seconds, same minute 
-earlySet <- Vitals %>% group_by(PatientSSN, VitalsDateTime) %>% summarise(VitalsTime = min(VitalsTime))
-vitals_final <- left_join(earlySet, Vitals, "VitalsTime")
-vitals_final <- spread(vitals_final, VitalType, value)
-
-
-
-
+neut_flag <- function(x) {
+  if (x >= 12 | x <= 4) {
+    flag = 1
+  } else { 
+    flag = 0
+  }
+  print(x)
+  return(flag)
+}
 
 
 #Labs
-Labs <- as_tibble(backup_Labs)
-L <- Labs %>% select(-LabsArrivalDate)
-labList <- list()
+labs <-(backup_Labs) #%>% group_by(LabsPatientSSN) %>% summarise(lt = min(LabsTime))
+labs$NEUT <-labs$NEUT %>% as.numeric()
+uq_patientssn <- unique(labs$LabsPatientSSN)
+uq_patientssn = '010247235'
+uq_dates <-labs[labs$LabsPatientSSN == uq_patientssn,] %>% as.data.frame()
+early_set <- uq_dates  %>% group_by(LabsDate) %>% summarise(LabsTime = min(LabsTime))
+
+a<-uq_dates %>% inner_join(early_set, c('LabsDate','LabsTime'))
+a$NEUT <- as.numeric(a$NEUT)
+a$flag_neut <- sapply(as.numeric(a$NEUT), function(x)  (x >=12 | x<=4 ) )
+
+
+
+
+
+
+L <- labs %>% select(-LabsArrivalDate)
+lab_list <- list()
 labSubList <- list()
 uniqs <- L$LabsPatientSSN %>% unique() %>% levels()
 for (i in 1:length(uniqs[1:20])) {
@@ -343,13 +335,13 @@ for (i in 1:length(uniqs[1:20])) {
         values[[data[x,]$NEUT]] = data$NEUT[x]
       }
     }
-  labList[[i]] <- uq$NEUT
+  lab_list[[i]] <- uq$NEUT
 }
-for (i in 1:length(labList)) {
-  line <- rbind(line, labList[[i]])
+for (i in 1:length(lab_list)) {
+  line <- rbind(line, lab_list[[i]])
 }
-for (i in 1:length(labList)) {
-  labList[[i]] <- labList[[i]][1]
+for (i in 1:length(lab_list)) {
+  lab_list[[i]] <- lab_list[[i]][1]
 }
 
 
