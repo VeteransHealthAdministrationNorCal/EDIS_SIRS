@@ -31,8 +31,6 @@ WHERE
 backup_ed_all <- sqlQuery(con, query_ed_all)
 odbcCloseAll()
 rm('con', 'dsn', 'query_ed_all')
-
-
 ```
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
@@ -73,8 +71,6 @@ ORDER BY
 backup_health_factor <- sqlQuery(con, query_health_factor)
 odbcCloseAll()
 rm('con', 'dsn', 'query_health_factor')
-
-
 ```
 
 
@@ -182,33 +178,33 @@ rm('con', 'dsn', 'query_labs')
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Data manipulations (on separate sets)
 
-#ed_all
+
+# ed_all
 ed_all <- backup_ed_all
-#Get counts by date
+# Get counts by date
 count_all <- ed_all %>% select(arrival_date) %>% group_by(arrival_date) %>% summarise("all" = n())
 
-#health_factor
+
+# health_factor
 health_factor <- backup_health_factor
-health_factor$health_factor_flag_yes <- ifelse(health_factor$health_factor_type =='ED SEPSIS YES CRITERIA',1,0)
-#Set flag
-health_factor$health_factor_flag <- as.numeric(1)
-#Get counts by date
+health_factor$health_factor_flag_yes <- ifelse(health_factor$health_factor_type == 'ED SEPSIS YES CRITERIA', 1, 0)
+# Get counts by date
 health_factor_yes <- health_factor %>% select(arrival_date) %>% group_by(arrival_date) %>% summarise("yes" = n())
 
-#vitals
+
+# vitals
 vitals <- backup_vitals
 vitals$value <- as.character(vitals$result) %>% sapply(function(x) {if (!grepl("/",as.character(x))) x else strsplit(x,'/')[[1]][1]}) %>% as.numeric()
 vitals$vitals_time <- vitals$vitals_date_time  %>% sapply(function(x) strftime(x,'%Y-%m-%d %H:%M:%S'))
 vitals <- select(vitals, -systolic, -result)
-
 vital_type = c("BLOOD PRESSURE", "PULSE","RESPIRATION","TEMPERATURE")
-
 
 get_date_set <- function(date) {
   date_set <- vitals %>% filter(patient_ssn == uq_patientssn, vitals_date == date)
   vital_idx <- sapply(vital_type, function(x) which(date_set$vital_type == x)[1]) %>% as.vector()
   flag = (sapply(date_set[vital_idx,]$vital_type, function(x) is.na(x)) %>% sum())
-  return (list(date_set = date_set[vital_idx,],missing_flag = flag, date = date, sirs_flag = filter_flag(date_set[vital_idx,])))
+  
+  return(list(date_set = date_set[vital_idx,],missing_flag = flag, date = date, sirs_flag = filter_flag(date_set[na.omit(vital_idx),])))
 }
 
 filter_flag <- function(x) {
@@ -222,7 +218,7 @@ filter_flag <- function(x) {
       }
     }
     if (v == 'TEMPERATURE') {
-      if (spread_it['TEMPERATURE'] > 100.0  | spread_it['TEMPERATURE'] < 95.0) {
+      if (spread_it['TEMPERATURE'] >= 100.4  | spread_it['TEMPERATURE'] <= 96.8) {
         flag_count = flag_count + 1 
       }
     }
@@ -241,16 +237,14 @@ filter_flag <- function(x) {
 }
 
 l = list()
-for (uq_patientssn in unique(vitals$patient_ssn)[1:800]) {
-  #print(uq_patientssn)
+for (uq_patientssn in unique(vitals$patient_ssn)) {
   uq_patient <- vitals %>% filter(patient_ssn == uq_patientssn)
   uq_dates <- unique(uq_patient$vitals_date)
-    
+  
   for (i in 1:length(uq_dates)) {
     date <- uq_dates[i]
     date_list = list()
     date <- (as.Date(date, origin = "1970-01-01"))
-    #print(date)
     l[[uq_patientssn]][[i]] <- (get_date_set(date))
   }
 }
@@ -262,7 +256,7 @@ transform_vital_list <- function(ssn) {
     'patient_ssn' = ssn,
     'missing' = entry_list$missing_flag, 
     'sirs' = entry_list$sirs_flag, 
-    'date' = as.Date(entry_list$date, origin = "1970-01-01"))))
+    'arrival_date' = as.Date(entry_list$date, origin = "1970-01-01"))))
   }
   return(stack)
 }
@@ -272,32 +266,21 @@ make_vital_df <- function(stack) {
     for (s in stack) {
       tmp <- rbind(tmp,s)
     }
-  
   return(data.frame(tmp))
 }    
 vital_df <- names(l) %>% lapply(function(x) transform_vital_list(x)) %>% make_vital_df() %>% as.data.frame()
 
 
-#}
-#
-# Pack l into a meaningful dataframe.
-#
-vital_tibble <- tibble()
-
-
-
-#Labs
+# labs
 labs <- backup_labs
 labs$neut <- as.numeric(levels(labs$neut))[labs$neut]
-labs$flag <- sapply(labs$neut, function(x) (x <= 4 | x >= 12))
-
-# two differnt times on the same date
+labs$flag <- sapply(labs$neut, function(x) (x >= 12.0 | x <= 4.0))
+# two different times on the same date
 labs[labs$patient_ssn == '',] %>% group_by(patient_ssn) %>% summarise('labs_date_time' = min(labs_date_time)) %>% inner_join(labs,c('patient_ssn', 'labs_date_time'))
 
 get_lab_set <- function(ssn) {
   return(labs[labs$patient_ssn == ssn ,] %>% group_by(patient_ssn) %>% group_by(labs_date) %>% summarise('labs_date_time' = min(labs_date_time)) %>% inner_join(labs[labs$patient_ssn == ssn,],c( 'labs_date_time')))
 }
-
 labs_tibble <- tibble() # tibble to hold unique first labsets
 
 for (uq_patientssn in unique(labs$patient_ssn)) {
@@ -305,17 +288,17 @@ for (uq_patientssn in unique(labs$patient_ssn)) {
 }
 
 
-
-
 #Combine datasets
 edis_sirs <- tibble()
+edis_sirs <- left_join(ed_all, select(health_factor, -patient_last_name, -patient_first_name)) 
+edis_sirs <- left_join(edis_sirs, vital_df)
+edis_sirs <- left_join(edis_sirs, select(labs_tibble, -labs_date.x, -labs_date.y, -labs_date_time))
 
-edis_sirs <- left_join(select(ed_all, -arrival_date), select(health_factor, -patient_last_name, -patient_first_name), "patient_ssn") 
 
-edis_sirs <- left_join(edis_sirs, select(health_factors_yes, -patient_last_name, -patient_first_name), "patient_ssn")
+#Data manipulations (on combined set)
 
 
-#Data manipulations (on combined sets)
+
 
 ```
 
