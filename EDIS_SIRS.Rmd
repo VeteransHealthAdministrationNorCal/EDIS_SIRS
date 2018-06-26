@@ -1,15 +1,44 @@
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+---
+output:
+  html_document: default
+  pdf_document: default
+---
 
+# Sepsis tracker
+#### Author: Alon Ben-Ari, MD
+
+###This is an infographic to track the performance of the sepsis order set instituted in 4/2018 and to give a visual tally of in hospital sepsis, sepsis on admission and their corresponding mortality.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
 #namespace
 library(RODBC)
-library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(gridExtra)
+library(knitr)
+library(ggplot2)
+library(kableExtra)
 ```
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Query All ED Patients
-dsn <- "VhaCdwDwhSql33.vha.med.va.gov"
-con <- odbcConnect(dsn, uid = "",  pwd = "")
+pipeSQL <-function(){
+   channel <- RODBC::odbcDriverConnect(connection = 'driver={SQL Server}; server=vhacdwdwhsql33.vha.med.va.gov; database=LSV;  trusted_connection=true')
+   function(q){
+    sqlQuery(channel,q)
+    } 
+
+}
+
+pipeMelt <- function(df){
+  # A function to return a melted dataframe
+  function(vars){
+    return(melt(df,id.vars = vars))
+  }
+}
+
 query_ed_all <- c("
 SELECT DISTINCT
   CAST(EDIS.PatientArrivalDateTime AS date) AS arrival_date,
@@ -28,15 +57,14 @@ WHERE
   AND SPat.TestPatientFlag IS NULL
   AND Loc.LocationSID = '132765'
 ")
-backup_ed_all <- sqlQuery(con, query_ed_all)
+backup_ed_all <-pipeSQL()(query_ed_all)
 odbcCloseAll()
-rm('con', 'dsn', 'query_ed_all')
+
 ```
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Query Health Factors 'Sepsis Result YES & NO'
-dsn <- "VhaCdwDwhSql33.vha.med.va.gov"
-con <- odbcConnect(dsn, uid = "",  pwd = "")
+
 query_health_factor <- c("
 SELECT DISTINCT
   CAST(EDIS.PatientArrivalDateTime AS date) AS arrival_date,
@@ -60,7 +88,7 @@ FROM
     AND health_factor.HealthFactorTypeSID = DimHFac.HealthFactorTypeSID
 WHERE 
   EDIS.Sta3n = '612'
-  AND EDIS.PatientArrivalDateTime >= DATEADD(DAY, -30, GETDATE())
+  AND EDIS.PatientArrivalDateTime >= DATEADD(DAY, -31, GETDATE())
   AND SPat.TestPatientFlag IS NULL
   AND (DimHFac.HealthFactorType = 'ED SEPSIS NO CRITERIA' 
     OR DimHFac.HealthFactorType = 'ED SEPSIS YES CRITERIA')
@@ -68,19 +96,17 @@ WHERE
 ORDER BY
   SPat.PatientSSN
 ")
-backup_health_factor <- sqlQuery(con, query_health_factor)
+backup_health_factor <- pipeSQL()(query_health_factor)
 odbcCloseAll()
-rm('con', 'dsn', 'query_health_factor')
+
 ```
 
 
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Query vitals
-dsn <- "VhaCdwDwhSql33.vha.med.va.gov"
-con <- odbcConnect(dsn, uid = "",  pwd = "")
-query_vitals <- c("
-SELECT
+
+query_vitals <- c("SELECT
   patient_ssn,
   patient_last_name,
   patient_first_name,
@@ -92,6 +118,7 @@ SELECT
   result
 FROM
   (
+ 
   SELECT DISTINCT
     SPat.PatientSSN AS patient_ssn,
     SPat.PatientLastName AS patient_last_name,
@@ -121,27 +148,27 @@ FROM
     AND EDIS.PatientArrivalDateTime >= DATEADD(DAY, -30, GETDATE())
     AND SPat.TestPatientFlag IS NULL
     AND Loc.LocationSID = '132765'
-    AND vitals.VitalSignEnteredDateTime BETWEEN EDIS.PatientArrivalDateTime AND   DATEADD(hour, +1, EDIS.PatientArrivalDateTime)
     AND DimVType.VitalType IN ('PULSE', 'TEMPERATURE', 'RESPIRATION', 'BLOOD PRESSURE')
   GROUP BY
     SPat.PatientSSN,SPat.PatientLastName,SPat.PatientFirstName,EDIS.PatientArrivalDateTime,vitals.VitalSignEnteredDateTime,vitals.VitalSignEnteredDateTime,DimVType.VitalType,vitals.Systolic,vitals.VitalResult
+
   ) AS InnerQ
 WHERE
-  arrival_date = vitals_date
+  (arrival_date = vitals_date)
 GROUP BY
-  patient_ssn, patient_last_name, patient_first_name, vitals_date_time, vitals_date, vitals_time, vital_type, systolic, result
+   patient_ssn, patient_last_name, patient_first_name, vitals_date_time, vitals_date, vitals_time, vital_type, systolic, result
 ORDER BY
   patient_ssn, patient_last_name, patient_first_name, vitals_date_time, vital_type, systolic, result
+
 ")
-backup_vitals <- sqlQuery(con, query_vitals)
+backup_vitals <- pipeSQL()(query_vitals)
 odbcCloseAll()
-rm('con', 'dsn', 'query_vitals')
+
 ```
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Query Labs
-dsn <- "VhaCdwDwhSql33.vha.med.va.gov"
-con <- odbcConnect(dsn, uid = "",  pwd = "")
+
 query_labs <- c("
 SELECT DISTINCT
   CAST(EDIS.PatientArrivalDateTime AS DATE) AS arrival_date,
@@ -164,16 +191,87 @@ FROM
     AND DimLabs.LabChemTestSID = Labs.LabChemTestSID
 WHERE
   EDIS.Sta3n = '612'
-  AND EDIS.PatientArrivalDateTime >= DATEADD(DAY, -30, GETDATE())
+  AND EDIS.PatientArrivalDateTime >= DATEADD(DAY, -31, GETDATE())
   AND SPat.TestPatientFlag IS NULL
   AND Loc.LocationSID = '132765'
   AND CAST(EDIS.PatientArrivalDateTime AS DATE) = CAST(Labs.LabChemSpecimenDateTime AS DATE)
   AND DimLabs.LabChemPrintTestName = 'neut #'
 ")
-backup_labs <- sqlQuery(con, query_labs)
+backup_labs <- pipeSQL()(query_labs)
 odbcCloseAll()
-rm('con', 'dsn', 'query_labs')
+
+
 ```
+
+```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
+
+sepsisQuery <- function(nDays,presentFlag){
+
+paste("select  distinct 
+presentAdmit.PatientSID,
+patient.PatientSSN,
+patient.PatientFirstName,
+patient.PatientLastName,
+patient.DeceasedFlag,
+patient.DeathDateTime,
+cast(inpat.AdmitDateTime as date) as AdmitDate,
+--presentAdmit.PresentOnAdmissionCode,
+datediff(d,inpat.AdmitDateTime,patient.DeathDateTime) as t2Death,
+--icd10label.ICD10Description,
+--icd10.ICD10Code,
+presentAdmit.PresentOnAdmissionCode
+from  [Inpat].[PresentOnAdmission] as presentAdmit 
+inner join Inpat.Inpatient as inpat on
+	inpat.InpatientSID = presentAdmit.InpatientSID
+inner join SPatient.SPatient as patient 
+	on presentAdmit.PatientSID = patient.PatientSID and inpat.Sta3n = patient.Sta3n
+
+inner join Dim.ICD10 as icd10 on 
+	 presentAdmit.ICD10SID = icd10.ICD10SID
+
+inner join Dim.ICD10DescriptionVersion as icd10Label on 
+		icd10Label.ICD10SID = icd10.ICD10SID and icd10.sta3n = icd10Label.Sta3n
+where
+patient.Sta3n = '612'
+and presentAdmit.PresentOnAdmissionCode  =",presentFlag,
+"and  patient.CDWPossibleTestPatientFlag <>'y'
+and inpat.AdmitDateTime >= Dateadd(d,",-nDays,",getdate()) 
+and (icd10.ICD10Code  like  ( '%[A][0-9][0-9]%') OR icd10.ICD10Code like ('R78.81')  OR icd10.ICD10Code like ('B37.')
+				OR icd10.ICD10Code like ('%R65.2[0-1]%'))
+and (datediff(d,inpat.AdmitDateTime,patient.DeathDateTime) <=30 OR datediff(d,inpat.AdmitDateTime,patient.DeathDateTime) is NULL)
+order by  patient.PatientSSN ")}
+nDays =720
+trackerNo<-pipeSQL()(sepsisQuery(nDays,"'N'"))%>% as.data.frame()
+trackerYes <-pipeSQL()(sepsisQuery(nDays,"'Y'"))
+odbcCloseAll()
+processTracker<-function(tracker){
+  tracker$AdmitDate <-as.Date(strftime(tracker$AdmitDate,'%Y-%m-%d', origin = "1970-01-01"))
+#totalCount <- tracker %>% group_by(AdmitDate) %>% summarise(ptNum = n())
+  mortality <-tracker %>% filter(DeceasedFlag == 'Y') %>% group_by(AdmitDate) %>% summarise(deceased = n())
+  survive <- tracker %>% filter(DeceasedFlag == 'N') %>% group_by(AdmitDate) %>% summarise(survive = n())
+  Admits <-tibble(AdmitDate = seq(Sys.Date()-nDays,Sys.Date(), by =1)) # updates SQL if change range
+  Admits<-left_join(Admits,mortality)
+  Admits<-left_join(Admits,survive)
+  Admits$deceased <- Admits$deceased %>% sapply(function(x){if (is.na(x)) 0 else x}) 
+  Admits$survive <- Admits$survive %>% sapply(function(x){if (is.na(x)) 0 else x})
+  magic <-pipeMelt(Admits)('AdmitDate')
+}
+#
+p1<-processTracker(trackerNo) %>% ggplot(aes(x=AdmitDate,y=value, fill = variable))+
+   geom_bar(stat = "identity",position="dodge")+
+   ggtitle("Counts sepsis NOT  presenting on admission")  +theme(axis.text.x = element_text(angle=45,hjust=1))+scale_y_continuous(breaks = seq(0,10,1))
+#
+
+
+p2<-processTracker(trackerYes) %>% ggplot(aes(x=AdmitDate,y=value, fill = variable))+
+   geom_bar(stat = "identity",position="dodge")+
+   ggtitle("Counts sepsis  presenting on admission")  +theme(axis.text.x = element_text(angle=45,hjust=1))+scale_y_continuous(breaks = seq(0,10,1))
+# 
+#gridExtra::grid.arrange(p1,p2,ncol=1)
+#rm(p1)
+#rm(p2)
+```
+
 
 ```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
 #Data manipulations (on separate sets)
@@ -181,12 +279,16 @@ rm('con', 'dsn', 'query_labs')
 
 # ed_all
 ed_all <- backup_ed_all
+ed_all$arrival_date <- as.Date(ed_all$arrival_date, origin = "1970-01-01")
+
 # Get counts by date
 count_all <- ed_all %>% select(arrival_date) %>% group_by(arrival_date) %>% summarise("all" = n())
 
 
 # health_factor
 health_factor <- backup_health_factor
+health_factor$arrival_date <- as.Date(health_factor$arrival_date, origin = "1970-01-01")
+
 health_factor$health_factor_flag_yes <- ifelse(health_factor$health_factor_type == 'ED SEPSIS YES CRITERIA', 1, 0)
 # Get counts by date
 health_factor_yes <- health_factor %>% select(arrival_date) %>% group_by(arrival_date) %>% summarise("yes" = n())
@@ -196,6 +298,7 @@ health_factor_yes <- health_factor %>% select(arrival_date) %>% group_by(arrival
 vitals <- backup_vitals
 vitals$value <- as.character(vitals$result) %>% sapply(function(x) {if (!grepl("/",as.character(x))) x else strsplit(x,'/')[[1]][1]}) %>% as.numeric()
 vitals$vitals_time <- vitals$vitals_date_time  %>% sapply(function(x) strftime(x,'%Y-%m-%d %H:%M:%S'))
+vitals$vitals_date <- as.Date(vitals$vitals_date, origin = "1970-01-01")
 vitals <- select(vitals, -systolic, -result)
 vital_type = c("BLOOD PRESSURE", "PULSE","RESPIRATION","TEMPERATURE")
 
@@ -204,7 +307,7 @@ get_date_set <- function(date) {
   vital_idx <- sapply(vital_type, function(x) which(date_set$vital_type == x)[1]) %>% as.vector()
   flag = (sapply(date_set[vital_idx,]$vital_type, function(x) is.na(x)) %>% sum())
   
-  return(list(date_set = date_set[vital_idx,],missing_flag = flag, date = date, sirs_flag = filter_flag(date_set[na.omit(vital_idx),])))
+  return(list(date_set = date_set[vital_idx,],missing_flag = flag, vitals_date = date, sirs_flag = filter_flag(date_set[na.omit(vital_idx),])))
 }
 
 filter_flag <- function(x) {
@@ -256,7 +359,7 @@ transform_vital_list <- function(ssn) {
     'patient_ssn' = ssn,
     'missing' = entry_list$missing_flag, 
     'sirs' = entry_list$sirs_flag, 
-    'arrival_date' = as.Date(entry_list$date, origin = "1970-01-01"))))
+    'arrival_date' = entry_list$vitals_date))) # this is NOT the arrival date, this is the Vitals date 'presumed' to be the same, to flag out the do not have same day vitals
   }
   return(stack)
 }
@@ -269,12 +372,15 @@ make_vital_df <- function(stack) {
   return(data.frame(tmp))
 }    
 vital_df <- names(l) %>% lapply(function(x) transform_vital_list(x)) %>% make_vital_df() %>% as.data.frame()
-
+vital_df$patient_ssn <-as.character(vital_df$patient_ssn)
 
 # labs
 labs <- backup_labs
-labs$neut <- as.numeric(levels(labs$neut))[labs$neut]
-labs$flag <- sapply(labs$neut, function(x) (x >= 12.0 | x <= 4.0))
+#labs$neut <- as.numeric(levels(labs$neut))[labs$neut]
+labs$labs_date_time <- as.Date(labs$labs_date_time, origin = "1970-01-01")
+labs$arrival_date <- as.Date(labs$arrival_date, origin = "1970-01-01")
+
+labs$neut_flag <- sapply(labs$neut, function(x) (x >= 12.0 | x <= 4.0))
 # two different times on the same date
 labs[labs$patient_ssn == '',] %>% group_by(patient_ssn) %>% summarise('labs_date_time' = min(labs_date_time)) %>% inner_join(labs,c('patient_ssn', 'labs_date_time'))
 
@@ -286,38 +392,37 @@ labs_tibble <- tibble() # tibble to hold unique first labsets
 for (uq_patientssn in unique(labs$patient_ssn)) {
   labs_tibble <- rbind(labs_tibble, get_lab_set(uq_patientssn))
 }
-
-
+labs_tibble$arrival_date <-as.Date(labs_tibble$arrival_date, origin = "1970-01-01")
+labs_tibble$patient_ssn <-as.character(labs_tibble$patient_ssn)
 #Combine datasets
 edis_sirs <- tibble()
-edis_sirs <- left_join(ed_all, select(health_factor, -patient_last_name, -patient_first_name)) 
-edis_sirs <- left_join(edis_sirs, vital_df)
-edis_sirs <- left_join(edis_sirs, select(labs_tibble, -labs_date.x, -labs_date.y, -labs_date_time))
 
+edis_sirs <- left_join(ed_all, select(health_factor, -patient_last_name, -patient_first_name)) 
+edis_sirs <- left_join(edis_sirs,vital_df)
+edis_sirs <- left_join(edis_sirs, select(labs_tibble, -labs_date.x, -labs_date.y, -labs_date_time))
+edis_sirs <- edis_sirs %>% arrange((desc(patient_ssn)))
 
 #Data manipulations (on combined set)
 
-
-
+ #edis_sirs[is.na(edis_sirs$missing),] # patient with vitals that match the date.
+ # table : sirs criteria to  sepsis_yes criteria
+# edis_sirs[!is.na(edis_sirs$sirs),][,c(6,8)] %>% table()
+ # number of patients who came to ED in 30 days
+ # ed_all_count<- ed_all %>% nrow
+# patient who had a NA for Spesis screen  
+  # edis_sirs[is.na(edis_sirs$health_factor_type),] %>% unique  %>% nrow()/(ed_all %>% nrow)
+edis_sirs[!is.na(edis_sirs$sirs),][,c(6,8)] %>% table() %>% 
+  as.data.frame()%>% kable(align = 'c', caption = c('HF Yes by sirs scoring'))
 
 ```
+```{r, echo=FALSE}
+edis_sirs[!is.na(edis_sirs$sirs),][,c(6,8)] %>% table() %>% 
+  as.data.frame()%>% kable(align = 'c', caption = c('HF Yes by sirs scoring')) %>% kable_styling( position = "center",latex_options = c("striped", "hold_position"),
+                full_width = F)
 
-```{r, echo=FALSE,results='hide',fig.keep='all', warning=FALSE, message=FALSE}
-#Plotz
-ggplot(data = countsByDate, fill = all) +
-  geom_bar(aes(x = arrival_date, y = yes), position = "dodge", stat = "identity") +
-  labs(x = "Arrival date", y = "Sepsis criteria satisfied (count)") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_x_date(date_breaks = "day", date_labels = "%b-%d")
+gridExtra::grid.arrange(p1,p2,ncol=1)
+```
 
-ggplot(data = countsByDate) +
-  geom_bar(aes(x = arrival_date, y = ratio), stat = "identity") +
-  labs(x = "Arrival date", y = "Sepsis criteria satisfied (ratio)") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_x_date(date_breaks = "day", date_labels = "%b-%d")
+``` {r,echo = FALSE}
 
-ggplot(data = countsByDate, aes(x = yes)) +
-  geom_histogram(fill = "#FF45A0", binwidth = .5)
-  
-  
 ```
