@@ -10,13 +10,8 @@
 library(shiny)
 library(RODBC)
 library(dplyr)
-library(tidyr)
 library(reshape2)
-library(gridExtra)
-library(knitr)
 library(ggplot2)
-library(kableExtra)
-
 # query CDW
 pipeSQL <- function(){
   channel <- RODBC::odbcDriverConnect(connection = "
@@ -29,7 +24,6 @@ pipeSQL <- function(){
     sqlQuery(channel, q)
   } 
 }
-
 # return a melted dataframe
 pipeMelt <- function(df){
   function(vars){
@@ -79,8 +73,6 @@ nDays = 270
 tracker_no <- pipeSQL()(query_sepsis(nDays, "'N'")) %>% as.data.frame()
 tracker_yes <- pipeSQL()(query_sepsis(nDays, "'Y'")) %>% as.data.frame()
 odbcCloseAll()
-
-
 
 ## END OF DATA FUN
       ###
