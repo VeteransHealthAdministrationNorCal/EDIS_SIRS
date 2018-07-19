@@ -69,7 +69,7 @@ query_sepsis <- function(nDays, presentFlag){
     patient.PatientSSN
   ")
 }
-nDays = 270
+nDays = 365
 tracker_no <- pipeSQL()(query_sepsis(nDays, "'N'")) %>% as.data.frame()
 tracker_yes <- pipeSQL()(query_sepsis(nDays, "'Y'")) %>% as.data.frame()
 odbcCloseAll()
