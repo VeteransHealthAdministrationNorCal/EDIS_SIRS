@@ -89,25 +89,19 @@ odbcCloseAll()
 # UI
 ui <- fluidPage(
   titlePanel("ED Sepsis Admits"),
-    # sidebar
-    #column(4, 
-    #  wellPanel(
-    #    dateInput('date',
-    #      label = 'Date input: yyyy-mm-dd',
-    #      value = Sys.Date()
-    #    )
-    #  )
-    #),
-  dateRangeInput("dates", label = h3("Date range")),
-  hr(),
-  fluidRow(column(4, verbatimTextOutput("value"))),
-
-     
-    # mainpanel
-    mainPanel(
-      plotOutput("plot1"),
-      plotOutput("plot2")
+  # sidebar
+  column(4, verbatimTextOutput("value"),
+    wellPanel(
+      dateRangeInput('dates',
+        label = 'Date input: yyyy-mm-dd'
+      )
     )
+  ),  
+  # mainpanel
+  mainPanel(
+    plotOutput("plot1"),
+    plotOutput("plot2")
+  )
 )
 # SERVER
 server <- function(input, output, session){
